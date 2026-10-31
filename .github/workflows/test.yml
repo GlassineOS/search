@@ -28,7 +28,8 @@ jobs:
           python-version: "3.12"
       - run: pip install -e ".[build,dev]"
       - id: pw
-        run: echo "version=$(pip show playwright | sed -n 's/^Version: //p')" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=$(pip show playwright | sed -n 's/^Version: //p')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
