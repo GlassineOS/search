@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glassine-docs"
+version = "0.1.0"
+description = "Semantic search over the GlassineOS documentation: CLI, builder and MkDocs plugin"
+readme = "README.md"
+license = "GPL-2.0-or-later"
+requires-python = ">=3.10"
+# onnxruntime is only imported by the transformer profile (the CLI's default). Where it
+# has no wheel (musl): pip install --no-deps, then numpy, and use --profile static.
+dependencies = ["numpy>=1.24", "onnxruntime>=1.17"]
+
+[project.optional-dependencies]
+# the docs build: the MkDocs plugin, both profiles
+build = ["mkdocs>=1.6,<2", "onnxruntime==1.31.1"]
+# rebuilding a derived model file from Hugging Face (dev fallback) needs onnx too
+derive = ["onnxruntime==1.31.1", "onnx"]
+dev = ["pytest", "tokenizers", "model2vec"]
+
+[project.urls]
+Documentation = "https://docs.glassine.org/architecture/search/"
+Source = "https://github.com/GlassineOS/search"
+
+[project.scripts]
+glassine-docs = "glassine_docs.cli:main"
+
+[project.entry-points."mkdocs.plugins"]
+glassine-search = "glassine_docs.plugin:SearchPlugin"
+
+[tool.setuptools]
+packages = ["glassine_docs"]
+
+[tool.setuptools.package-data]
+glassine_docs = ["models.json", "web/*.js", "web/*.css"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
