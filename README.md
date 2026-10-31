@@ -34,6 +34,14 @@ The MkDocs plugin `glassine-search` chunks every rendered page at its headings, 
 the BM25 index, embeds the chunks with both profiles, adds a "Related pages" block to
 each page and writes `search/` into the site.
 
+On the site it replaces Material's search worker. The plugin rewrites the `search` key
+of Material's `#__config` to our worker, which loads Material's own worker inside
+itself and speaks Material's protocol to the page, so the search box, results,
+highlighting, suggestions and keyboard handling stay Material's. The keyword results
+come from Material's worker at once; the first non-empty query loads the static model
+(8 MB) and vectors, and from then on each result is the keyword list and the vector
+list fused. Pages load nothing extra but the worker (6 KB).
+
 ```yaml
 plugins:
   - search            # the theme's search: keep it, and first
@@ -59,7 +67,7 @@ plugins:
 | `glassine_docs/transformer.py` | the transformer profile (onnxruntime, CPU) |
 | `glassine_docs/chunk.py`, `builder.py`, `plugin.py` | chunking, the build, the MkDocs plugin |
 | `glassine_docs/client.py`, `cli.py` | `glassine-docs` |
-| `glassine_docs/web/{ui,worker}.js`, `ui.css` | the site's search box integration and its web worker |
+| `glassine_docs/web/worker.js` | replaces Material's search worker: runs it for keywords, fuses in the vector ranking |
 | `glassine_docs/models.json` | the model lock: Hugging Face revision, files, sha256, release asset names |
 | `tools/mirror-models.sh` | prepares the release assets of the model mirror |
 | `tests/` | pytest and `node --test` suites |
@@ -69,7 +77,14 @@ plugins:
 ```sh
 make check            # offline: synthetic model, sample pages, Python and JS parity
 make check-models     # with the real models (downloads them once; HF=1 to allow Hugging Face)
+make check-browser    # the worker swap in headless Chromium (Playwright)
 ```
+
+`check-browser` builds a small site with Material, types into its search box and checks
+that a hit only the vectors can find is listed and ranked, that the keyword results
+show before the model arrives, and that arrows and Enter work. It relies on Material's
+internal worker protocol, so it runs against the Material range the docs repository
+uses (`mkdocs-material>=9.7,<10`, the `dev` extra); keep the two in step.
 
 The JS tokenizer and the Python one are both checked against Hugging Face
 `tokenizers` ids for both models. The node tests check the browser's query vectors bit

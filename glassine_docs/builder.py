@@ -23,7 +23,10 @@ from . import FORMAT_VERSION, __version__, bm25, chunk, fusion, models, quant, s
 from .staticmodel import StaticModel, convert
 
 WEB_DIR = Path(__file__).with_name("web")
-WEB_FILES = ["text.js", "score.js", "worker.js", "ui.js", "ui.css"]
+WEB_FILES = ["text.js", "score.js"]
+# The worker replaces Material's search worker and sits next to it (Material's worker
+# loads its language files relative to the worker's own URL).
+WORKER_DIR = "assets/javascripts/workers"
 PROFILES = ("static", "transformer")
 STATIC_CANDIDATES = 100
 
@@ -56,6 +59,7 @@ class Options:
 class Result:
     chunks: list
     files: dict[str, bytes] = field(default_factory=dict)
+    site_files: dict[str, bytes] = field(default_factory=dict)  # paths from the site root
     manifest: dict = field(default_factory=dict)
     related: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
     stats: dict = field(default_factory=dict)
@@ -260,6 +264,10 @@ class Builder:
             hn = hashed_name(name, data)
             files[hn] = data
             web[name] = hn
+        wdata = (WEB_DIR / "worker.js").read_bytes()
+        wpath = f"{WORKER_DIR}/{hashed_name('glassine-search.js', wdata)}"
+        res.site_files[wpath] = wdata
+        web["worker"] = wpath
         manifest["web"] = web
 
         if o.related_profile and o.related_profile in vectors:
@@ -277,6 +285,10 @@ class Builder:
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, data in res.files.items():
             (out_dir / name).write_bytes(data)
+        for rel, data in res.site_files.items():  # the search directory sits in the site root
+            p = out_dir.parent / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_bytes(data)
         (out_dir / "manifest.json").write_text(json.dumps(res.manifest, indent=1, ensure_ascii=False) + "\n",
                                                encoding="utf-8")
 

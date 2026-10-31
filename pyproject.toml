@@ -18,7 +18,9 @@ dependencies = ["numpy>=1.24", "onnxruntime>=1.17"]
 build = ["mkdocs>=1.6,<2", "onnxruntime==1.31.1"]
 # rebuilding a derived model file from Hugging Face (dev fallback) needs onnx too
 derive = ["onnxruntime==1.31.1", "onnx==1.23.2"]
-dev = ["pytest", "tokenizers", "model2vec"]
+# tests; mkdocs-material follows the docs repository's range (the browser test checks
+# the worker swap against it)
+dev = ["pytest", "tokenizers", "model2vec", "mkdocs-material>=9.7,<10", "playwright"]
 
 [project.urls]
 Documentation = "https://docs.glassine.org/architecture/search/"

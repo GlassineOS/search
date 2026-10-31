@@ -8,14 +8,18 @@
 Event order (mkdocs/commands/build.py, 1.6): every page is rendered to HTML
 (``on_page_content``) before ``on_env``; templates are rendered after it. So
 ``on_env`` chunks and embeds all pages and adds the related-pages block to
-each page's HTML, ``on_post_page`` adds the few inline lines that load the
-search UI on first use, and ``on_post_build`` writes ``search/``.
+each page's HTML, ``on_post_page`` points Material's search worker (the "search"
+key of its ``#__config``) at ours, and ``on_post_build`` writes ``search/`` and the
+worker. The theme's search box, results, keyboard handling and look stay Material's.
 """
 from __future__ import annotations
 
 import html
+import json
 import os
+import re
 from pathlib import Path
+from urllib.parse import quote
 
 from mkdocs.config import config_options as c
 from mkdocs.config.base import Config
@@ -26,7 +30,8 @@ from .builder import PROFILES, Builder, Options, Page
 
 log = get_plugin_logger(__name__)
 
-BOOT = """<script>(function(){var b=%s,u=%s,on=0;function go(e){var t=e.target;if(on||!t||!t.matches||!t.matches('[data-md-component="search-query"]'))return;on=1;var s=document.createElement("script");s.src=b+u;s.setAttribute("data-base",b);document.head.appendChild(s)}document.addEventListener("focusin",go,true);document.addEventListener("keydown",go,true)})()</script>"""
+# Material's config element; its "search" key names the search worker.
+CONFIG_RE = re.compile(r'(<script id="__config" type="application/json">)(.*?)(</script>)', re.S)
 
 
 class _Config(Config):
@@ -66,6 +71,7 @@ class SearchPlugin(BasePlugin[_Config]):
             static_model_file=os.environ.get("GLASSINE_SEARCH_STATIC_MODEL") or None)
         self.builder = Builder(self.opts)
         self.result = None
+        self._warned = False
         return config
 
     def on_env(self, env, config, files, **kw):
@@ -93,14 +99,30 @@ class SearchPlugin(BasePlugin[_Config]):
         return env
 
     def on_post_page(self, output, page, config, **kw):
-        if not self.result or "</body>" not in output:
+        """Point Material's search worker at ours (Material's worker runs inside it)."""
+        if not self.result or config.theme.name != "material":
             return output
-        base = get_relative_url(self.opts_out() + "/", page.url or "./")
-        if not base.endswith("/"):
-            base += "/"
-        boot = BOOT % (_js(base), _js(self.result.manifest["web"]["ui.js"]))
-        i = output.rfind("</body>")
-        return output[:i] + boot + output[i:]
+        m = CONFIG_RE.search(output)
+        try:
+            cfg = json.loads(m.group(2)) if m else None
+        except ValueError:
+            cfg = None
+        url = cfg.get("search") if isinstance(cfg, dict) else None
+        if not url or "/workers/" not in url:
+            if not self._warned:
+                self._warned = True
+                log.warning("no search worker in Material's #__config: semantic search not wired "
+                            "(has Material changed its config?)")
+            return output
+        site_root = url.split("assets/javascripts/workers/")[0]
+        material = url.rsplit("/", 1)[1]
+        worker = self.result.manifest["web"]["worker"]
+        # from the worker's directory to the site root, then to search/
+        up = "../" * worker.count("/")
+        cfg["search"] = (f"{site_root}{worker}?material={quote(material)}"
+                         f"&search={quote(up + self.opts_out() + '/')}")
+        blob = json.dumps(cfg, ensure_ascii=False).replace("</", "<\\/")
+        return output[:m.start(2)] + blob + output[m.end(2):]
 
     def opts_out(self) -> str:
         return self.config.out_dir.strip("/")
@@ -110,9 +132,5 @@ class SearchPlugin(BasePlugin[_Config]):
             return
         out = Path(config.site_dir) / self.opts_out()
         Builder.write(self.result, out)
-        log.info(f"wrote {len(self.result.files) + 1} files to {out}")
+        log.info(f"wrote {len(self.result.files) + 1} files to {out} and the search worker")
 
-
-def _js(s: str) -> str:
-    import json
-    return json.dumps(s).replace("</", "<\\/")

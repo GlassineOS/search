@@ -4,7 +4,7 @@ NODE ?= node
 TMP ?= .cache-local
 MODELS ?= .cache/glassine-search/models
 
-.PHONY: check test-py test-js models check-models golden
+.PHONY: check test-py test-js check-browser models check-models golden
 
 # Offline: synthetic model, sample pages; no network, no model download.
 check: test-py test-js
@@ -17,6 +17,12 @@ test-js:
 	for f in glassine_docs/web/*.js; do $(NODE) --check $$f || exit 1; done
 	$(PYTHON) -I tests/make_parity.py $(TMP)/parity
 	GDS_PARITY_DIR=$(TMP)/parity $(NODE) --test tests/js/*.test.js
+
+# Material's search worker swap in headless Chromium (Playwright). Pins nothing itself:
+# install the Material range the docs use (pip install -e ".[dev]" does).
+check-browser:
+	mkdir -p $(TMP)
+	GDS_BROWSER=1 $(PYTHON) -m pytest -q --basetemp=$(TMP)/pytest tests/browser
 
 # The real models (downloads them once into $(MODELS); HF=1 allows Hugging Face).
 models:

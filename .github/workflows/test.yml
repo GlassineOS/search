@@ -16,3 +16,22 @@ jobs:
       - run: pip install -e ".[build,dev]"
       - name: make check (offline; synthetic model)
         run: make check
+
+  # Material's search worker protocol, in a real browser: catches a Material release
+  # that changes it (mkdocs-material follows the docs repository's range).
+  browser:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[build,dev]"
+      - id: pw
+        run: echo "version=$(pip show playwright | sed -n 's/^Version: //p')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ steps.pw.outputs.version }}
+      - run: python -m playwright install --with-deps chromium-headless-shell
+      - run: make check-browser
