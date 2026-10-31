@@ -38,7 +38,8 @@ they don't have yet.
       "vectors": {"file": "transformer.<h>.bin", "sha256": "…", "size": 0}
     }
   },
-  "web": {"ui.js": "ui.<h>.js", "worker.js": "…", "text.js": "…", "score.js": "…", "ui.css": "…"},
+  "web": {"text.js": "text.<h>.js", "score.js": "score.<h>.js",
+          "worker": "assets/javascripts/workers/glassine-search.<h>.js"},
   "related": {"profile": "static", "count": 5}
 }
 ```
@@ -116,6 +117,20 @@ away from zero, clipped to ±127. All vectors are L2-normalised before quantizat
   by its L2 norm plus 1e-32. These are model2vec's rules, applied to the int8 table.
 - **transformer**: `[CLS] tokens [SEP]` (at most 512), `[CLS]` output, L2-normalised.
   Queries are prefixed with `query_prefix`, passages are not.
+
+## The site's search worker
+
+`web.worker` (a path from the site root) replaces Material's search worker. The plugin
+sets Material's `#__config` `search` key to
+`<worker>?material=<Material's worker file>&search=<search/ relative to the worker>`.
+The worker imports Material's worker and relays Material's messages (`0` SETUP,
+`1` READY, `2` QUERY, `3` RESULT with `{items: SearchItem[][], suggest?}`). The first
+non-empty QUERY loads `text.js`, `score.js`, the static model, the static vectors and
+the chunks. From then on a RESULT holds Material's items and the sections the vectors
+find (up to 10, as Material's documents without highlighting), ordered by reciprocal
+rank fusion of Material's keyword order and the vector order, grouped by page as
+Material groups them, with `score` = fused score × 1000. A RESULT is only sent for the
+newest query; when the model arrives, the newest query's RESULT is sent again, fused.
 
 ## Search
 

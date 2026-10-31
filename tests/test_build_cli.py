@@ -21,7 +21,8 @@ def test_outputs_and_manifest(site):
         data = (out / entry["file"]).read_bytes()
         assert hashlib.sha256(data).hexdigest() == entry["sha256"] and len(data) == entry["size"]
         assert entry["sha256"][:12] in entry["file"]  # content-hashed name
-    assert set(m["web"].values()) <= names
+    assert {m["web"]["text.js"], m["web"]["score.js"]} <= names
+    assert (out.parent / m["web"]["worker"]).is_file()
     chunks = json.loads((out / m["chunks"]["file"]).read_text())["chunks"]
     assert chunks[0]["id"] == f"docs@{COMMIT}:index.md"
     assert any(c["id"] == f"docs@{COMMIT}:guides/recovery.md#edl" for c in chunks)
