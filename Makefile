@@ -10,6 +10,7 @@ MODELS ?= .cache/glassine-search/models
 check: test-py test-js
 
 test-py:
+	mkdir -p $(TMP)
 	$(PYTHON) -m pytest -q --basetemp=$(TMP)/pytest
 
 test-js:
