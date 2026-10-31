@@ -14,6 +14,10 @@ COMMIT = "c0ffee" + "0" * 34
 @pytest.fixture(autouse=True)
 def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("GITHUB_SHA", COMMIT)
+    # Playwright finds its browsers under XDG_CACHE_HOME: keep the real location.
+    if "PLAYWRIGHT_BROWSERS_PATH" not in os.environ:
+        xdg = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+        monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", os.path.join(xdg, "ms-playwright"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
     monkeypatch.delenv("GLASSINE_MODELS_MIRROR", raising=False)
 
