@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "mirror": "https://github.com/GlassineOS/search/releases/download/models-1/",
+  "models": {
+    "static": {
+      "id": "minishlab/potion-base-8M",
+      "revision": "bf8b056651a2c21b8d2565580b8569da283cab23",
+      "license": "MIT",
+      "dims": 256,
+      "files": [
+        {
+          "path": "README.md",
+          "asset": "potion-base-8M--README.md",
+          "sha256": "de8ec91bf63c5f4c0e20751c227b2d049953e1cab5f8d5d44211c59a44795bdd",
+          "size": 5203
+        },
+        {
+          "path": "config.json",
+          "asset": "potion-base-8M--config.json",
+          "sha256": "2a6ac0e9aaa356a68a5688070db78fc3a464fefe85d2f06a1905ce3718687553",
+          "size": 202
+        },
+        {
+          "path": "model.safetensors",
+          "asset": "potion-base-8M--model.safetensors",
+          "sha256": "f65d0f325faadc1e121c319e2faa41170d3fa07d8c89abd48ca5358d9a223de2",
+          "size": 30236760
+        },
+        {
+          "path": "tokenizer.json",
+          "asset": "potion-base-8M--tokenizer.json",
+          "sha256": "e67e803f624fb4d67dea1c730d06e1067e1b14d830e2c2202569e3ef0f70bb50",
+          "size": 683666
+        }
+      ]
+    },
+    "transformer": {
+      "id": "BAAI/bge-small-en-v1.5",
+      "revision": "5c38ec7c405ec4b44b94cc5a9bb96e735b38267a",
+      "license": "MIT",
+      "dims": 384,
+      "query_prefix": "Represent this sentence for searching relevant passages: ",
+      "pooling": "cls",
+      "max_length": 512,
+      "onnx": "onnx/model.int8.onnx",
+      "files": [
+        {
+          "path": "README.md",
+          "asset": "bge-small-en-v1.5--README.md",
+          "sha256": "ddb964361a55c6e5dfca6361615854b260c9c960205d04c7520151aaa1d75837",
+          "size": 94783
+        },
+        {
+          "path": "config.json",
+          "asset": "bge-small-en-v1.5--config.json",
+          "sha256": "094f8e891b932f2000c92cfc663bac4c62069f5d8af5b5278c4306aef3084750",
+          "size": 743
+        },
+        {
+          "path": "1_Pooling/config.json",
+          "asset": "bge-small-en-v1.5--1_Pooling-config.json",
+          "sha256": "d1caf60c96f5fba2157c0c26b76d80818fad6cf0b8eb5e73ec372ff9818eba5c",
+          "size": 190
+        },
+        {
+          "path": "tokenizer.json",
+          "asset": "bge-small-en-v1.5--tokenizer.json",
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+          "size": 711396
+        },
+        {
+          "path": "onnx/model.onnx",
+          "asset": "bge-small-en-v1.5--onnx-model.onnx",
+          "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+          "size": 133093490
+        }
+      ],
+      "derived": [
+        {
+          "path": "onnx/model.int8.onnx",
+          "asset": "bge-small-en-v1.5--onnx-model.int8.onnx",
+          "from": "onnx/model.onnx",
+          "recipe": "onnxruntime-quantize-dynamic-qint8",
+          "onnxruntime": "1.31.1",
+          "sha256": "6c09b0019d2f72058c72f39ca5b4f19e79edd65dbe944921c7395b74ddaeec43",
+          "size": 33807386
+        }
+      ]
+    }
+  }
+}
