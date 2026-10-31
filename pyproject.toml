@@ -17,7 +17,7 @@ dependencies = ["numpy>=1.24", "onnxruntime>=1.17"]
 # the docs build: the MkDocs plugin, both profiles
 build = ["mkdocs>=1.6,<2", "onnxruntime==1.31.1"]
 # rebuilding a derived model file from Hugging Face (dev fallback) needs onnx too
-derive = ["onnxruntime==1.31.1", "onnx"]
+derive = ["onnxruntime==1.31.1", "onnx==1.23.2"]
 dev = ["pytest", "tokenizers", "model2vec"]
 
 [project.urls]

@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: GPL-2.0-or-later */
-/* Semantic search results: the theme's own result classes do the styling;
-   this only swaps the lists. No transitions: the site is read on e-ink. */
+/* Semantic search results. The theme's own result classes do the styling; this
+   only swaps the lists. Colours come from the theme's variables. No transitions:
+   the site is read on e-ink. */
 .gds-on > .md-search-result__meta,
 .gds-on > .md-search-result__list { display: none; }
 .gds-results[hidden] { display: none; }
-.gds-results .gds-crumb { margin: 0; font-size: .64rem; opacity: .75; }
-.gds-results mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
+.gds-results .gds-crumb { margin: 0; font-size: .64rem; color: var(--md-default-fg-color--light); }
 .gds-results * { transition: none !important; animation: none !important; }
