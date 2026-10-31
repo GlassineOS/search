@@ -42,18 +42,22 @@
 
   const esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
+  const STOP = new Set(["the", "and", "for", "how", "does", "what", "when", "why", "with", "into", "from", "this", "that"]);
+
   function snippet(text, q) {
-    const words = q.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((w) => w.length > 2);
+    const words = q.toLowerCase().split(/[^\p{L}\p{N}_-]+/u).filter((w) => w.length > 2 && !STOP.has(w));
     const low = text.toLowerCase();
     let at = -1;
     for (const w of words) { const i = low.indexOf(w); if (i >= 0 && (at < 0 || i < at)) at = i; }
-    let start = at > 80 ? text.lastIndexOf(" ", at - 60) + 1 : 0;
+    const start = at > 80 ? text.lastIndexOf(" ", at - 60) + 1 : 0;
     let s = text.slice(start, start + 240);
     if (start + 240 < text.length) s = s.replace(/\s+\S*$/, "") + " …";
     if (start > 0) s = "… " + s;
     let html = esc(s);
-    for (const w of words) {
-      html = html.replace(new RegExp("(" + w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")", "giu"), "<mark>$1</mark>");
+    if (words.length) {
+      // whole words and word starts only ("back" marks "backup", not "feedback")
+      const alt = words.map((w) => esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+      html = html.replace(new RegExp("(^|[^\\p{L}\\p{N}&;])(" + alt + ")", "giu"), "$1<mark>$2</mark>");
     }
     return html;
   }

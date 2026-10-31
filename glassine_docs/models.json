@@ -82,6 +82,7 @@
           "from": "onnx/model.onnx",
           "recipe": "onnxruntime-quantize-dynamic-qint8",
           "onnxruntime": "1.31.1",
+          "onnx": "1.23.2",
           "sha256": "6c09b0019d2f72058c72f39ca5b4f19e79edd65dbe944921c7395b74ddaeec43",
           "size": 33807386
         }

@@ -13,6 +13,7 @@ test-py:
 	$(PYTHON) -m pytest -q --basetemp=$(TMP)/pytest
 
 test-js:
+	for f in glassine_docs/web/*.js; do $(NODE) --check $$f || exit 1; done
 	$(PYTHON) -I tests/make_parity.py $(TMP)/parity
 	GDS_PARITY_DIR=$(TMP)/parity $(NODE) --test tests/js/*.test.js
 

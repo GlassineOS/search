@@ -282,19 +282,26 @@ class Builder:
 
 
 def related_pages(chunks, vecs: np.ndarray, count: int) -> dict[str, list[tuple[str, float]]]:
-    """Per page: the pages whose mean chunk vector is closest (cosine)."""
+    """Per page, the closest pages. Page similarity: each chunk's best match in the other
+    page, averaged, in both directions (a mean page vector favours long, general pages)."""
     pages: dict[str, list[int]] = {}
     for i, c in enumerate(chunks):
         pages.setdefault(c.page, []).append(i)
     names = list(pages)
     if not names:
         return {}
-    m = quant.normalize(np.stack([vecs[pages[n]].mean(axis=0) for n in names]))
-    sim = m @ m.T
+    v = quant.normalize(np.asarray(vecs, dtype=np.float64))
+    sim = v @ v.T
+    n = len(names)
+    ps = np.zeros((n, n))
+    for a, na in enumerate(names):
+        for b, nb in enumerate(names):
+            sub = sim[np.ix_(pages[na], pages[nb])]
+            ps[a, b] = (sub.max(axis=1).mean() + sub.max(axis=0).mean()) / 2
     out = {}
     for a, name in enumerate(names):
-        order = [b for b in quant.rank(sim[a]) if b != a][:count]
-        out[name] = [(names[b], float(sim[a, b])) for b in order]
+        order = [b for b in quant.rank(ps[a]) if b != a][:count]
+        out[name] = [(names[b], float(ps[a, b])) for b in order]
     return out
 
 
