@@ -95,6 +95,8 @@
   }
 
   input.addEventListener("input", () => { if (!current()) setActive(false); else if (ready) send(); });
+  // The clear button resets the form; no input event follows.
+  if (input.form) input.form.addEventListener("reset", () => { seq++; setActive(false); });
 
   // The theme's Enter opens the best of ITS results, its arrows walk its own
   // (now hidden) list: while our list is shown, handle those keys first.

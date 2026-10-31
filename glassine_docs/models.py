@@ -106,7 +106,11 @@ def fetch_file(cache: Path, entry: dict, f: dict, mirror: str, hf: bool = False,
 def derive(f: dict, src: Path, dest: Path) -> None:
     if f["recipe"] != "onnxruntime-quantize-dynamic-qint8":
         raise ModelError(f"unknown recipe {f['recipe']}")
-    from onnxruntime.quantization import QuantType, quantize_dynamic
+    try:
+        from onnxruntime.quantization import QuantType, quantize_dynamic
+    except ImportError as e:
+        raise ModelError(f"rebuilding {f['path']} needs onnxruntime and onnx: "
+                         'pip install "glassine-docs[derive]" (or use --profile static)') from e
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".part.onnx")
