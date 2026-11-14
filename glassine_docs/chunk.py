@@ -37,6 +37,7 @@ class Section:
 @dataclass
 class Chunk:
     id: str
+    source: str
     page: str
     title: str
     heading: str
@@ -68,6 +69,7 @@ class _Parser(HTMLParser):
         self.heading: tuple[int, str | None] | None = None
         self.heading_text: list[str] = []
         self.trail: list[tuple[int, str]] = []
+        self.h1 = False  # the page's title is its first h1
 
     # text accumulation -----------------------------------------------------
     def _flush(self):
@@ -130,7 +132,8 @@ class _Parser(HTMLParser):
                 self.trail = [(lv, t) for lv, t in self.trail if lv < level]
                 self.trail.append((level, text))
                 self.sections.append(Section(ident, text, level, [t for _, t in self.trail]))
-            elif level == 1:
+            elif level == 1 and not self.h1:
+                self.h1 = True
                 self.sections[0].heading = text or self.sections[0].heading
             else:
                 self.sections[-1].blocks.append(text)
@@ -172,7 +175,8 @@ def _split(blocks: list[str], max_words: int) -> list[list[str]]:
 
 def chunk_page(html: str, *, source: str, commit: str, page: str, title: str, url: str,
                max_words: int = MAX_WORDS) -> list[Chunk]:
-    """Chunks of one page. ``page`` is its source path, ``url`` its absolute URL."""
+    """Chunks of one page. ``page`` is its path in the source's repository, ``url`` its
+    link: relative to the site root, or absolute for a page of another repository."""
     p = _Parser(title)
     p.feed(html)
     p.close()
@@ -185,7 +189,7 @@ def chunk_page(html: str, *, source: str, commit: str, page: str, title: str, ur
         link = url + (f"#{s.anchor}" if s.anchor else "")
         for i, blocks in enumerate(_split(s.blocks, max_words)):
             out.append(Chunk(
-                id=base + (f"~{i + 1}" if i else ""), page=page, title=title,
+                id=base + (f"~{i + 1}" if i else ""), source=source, page=page, title=title,
                 heading=s.heading if s.anchor else title, path=s.path, url=link,
                 text="\n".join(blocks)))
     return out

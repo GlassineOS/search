@@ -6,7 +6,8 @@ Catches Material changing its search worker protocol or result rendering. Run wi
 
 The site is built with a synthetic static model in which the word "rescue" means the
 "Enter recovery" section, a word that appears on no page: only the vector side can
-find it.
+find it. With another repository among the sources, "lifeboat" means a section of it,
+which Material's index doesn't have.
 """
 import http.server
 import json
@@ -26,7 +27,7 @@ playwright = pytest.importorskip("playwright.sync_api")
 
 from glassine_docs import quant, store  # noqa: E402
 from glassine_docs.staticmodel import StaticModel  # noqa: E402
-from helpers import synthetic_static_model  # noqa: E402
+from helpers import git_repo, sources_toml, synthetic_static_model  # noqa: E402
 
 PAGES = {
     "index.md": "# Home\n\nGlassineOS runs on e-ink tablets.\n\n## Slots\n\n"
@@ -51,31 +52,32 @@ plugins:
 """
 
 
-def build(root, model_file, emb):
+def build(root, model_file, emb, env=None):
     env = {**os.environ, "GLASSINE_SEARCH_STATIC_MODEL": str(model_file),
            "GLASSINE_SEARCH_PROFILES": "static", "GLASSINE_SEARCH_EMBED_CACHE": str(emb),
-           "NO_MKDOCS_2_WARNING": "1"}
+           "NO_MKDOCS_2_WARNING": "1", **(env or {})}
     subprocess.run([sys.executable, "-m", "mkdocs", "build", "--strict", "-q"], cwd=root, env=env, check=True)
 
 
-def rescue_model(root, emb) -> None:
-    """Build with a random model, then point "rescue" at the Enter recovery chunk."""
+def rescue_model(root, emb, words=(("rescue", "#enter-recovery"),), env=None) -> None:
+    """Build with a random model, then point each word at the chunk whose URL ends so."""
     data = synthetic_static_model()
     (root / "model.bin").write_bytes(data)
-    build(root, root / "model.bin", emb)
+    build(root, root / "model.bin", emb, env)
     site = root / "site" / "search"
     m = json.loads((site / "manifest.json").read_text())
     chunks = json.loads((site / m["chunks"]["file"]).read_text())["chunks"]
-    target = next(c for c in chunks if c["url"].endswith("#enter-recovery"))
     sm = StaticModel(data)
-    trail = " › ".join([target["title"]] + [p for p in target["path"] if p != target["title"]])
-    vec = sm.embed(trail + "\n" + target["text"]) * 50  # outweighs any other word in a query
     meta, arrays = store.unpack(data)
     table, scale = arrays["table"].copy(), arrays["scale"].copy()
-    tid = sm.tokenizer.vocab["rescue"]
-    table[tid], scale[tid] = quant.quantize_rows(vec)
+    for word, end in words:
+        target = next(c for c in chunks if c["url"].endswith(end))
+        trail = " › ".join([target["title"]] + [p for p in target["path"] if p != target["title"]])
+        vec = sm.embed(trail + "\n" + target["text"]) * 50  # outweighs any other word in a query
+        tid = sm.tokenizer.vocab[word]
+        table[tid], scale[tid] = quant.quantize_rows(vec)
     (root / "model.bin").write_bytes(store.pack(meta, {"scale": scale, "table": table}))
-    build(root, root / "model.bin", emb)
+    build(root, root / "model.bin", emb, env)
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
@@ -90,18 +92,51 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
 
-@pytest.fixture
-def site(tmp_path):
-    for name, text in PAGES.items():
-        (tmp_path / "docs" / name).parent.mkdir(parents=True, exist_ok=True)
-        (tmp_path / "docs" / name).write_text(text)
-    (tmp_path / "mkdocs.yml").write_text(MKDOCS_YML)
-    rescue_model(tmp_path, tmp_path / "emb")
+def serve(tmp_path):
     Handler.release = threading.Event()
     httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(tmp_path / "site")))
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd
+
+
+def write_site(tmp_path, yml=MKDOCS_YML):
+    for name, text in PAGES.items():
+        (tmp_path / "docs" / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / "docs" / name).write_text(text)
+    (tmp_path / "mkdocs.yml").write_text(yml)
+
+
+@pytest.fixture
+def site(tmp_path):
+    write_site(tmp_path)
+    rescue_model(tmp_path, tmp_path / "emb")
+    httpd = serve(tmp_path)
     yield f"http://127.0.0.1:{httpd.server_address[1]}/"
     Handler.release.set()
+    httpd.shutdown()
+
+
+OTHER = {
+    "docs/index.md": "# Flasher\n\nThe flasher writes images.\n",
+    "docs/guides/images.md": "# Images & slots\n\nHow images are written.\n\n"
+                             "## Write the `<image>` — safely\n\nKeep the battery above half while writing.\n",
+}
+
+
+@pytest.fixture
+def site_with_source(tmp_path):
+    commit = git_repo(tmp_path / "repo", OTHER)
+    sources_toml(tmp_path / "search-sources.toml",
+                 [{"repository": "GlassineOS/flasher", "folder": "docs", "commit": commit}])
+    write_site(tmp_path, MKDOCS_YML + "      sources_file: search-sources.toml\n")
+    (tmp_path / "mkdocs.yml").write_text((tmp_path / "mkdocs.yml").read_text().replace(
+        "  - glassine-search\n", "  - glassine-search:\n"))
+    env = {"GLASSINE_SEARCH_FETCH_URL": f"file://{tmp_path}/repo"}
+    rescue_model(tmp_path, tmp_path / "emb", [("rescue", "#enter-recovery"), ("lifeboat", "--safely")], env)
+    Handler.release.set()  # the model is not held back here
+    httpd = serve(tmp_path)
+    Handler.release.set()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}/", commit
     httpd.shutdown()
 
 
@@ -153,4 +188,104 @@ def test_material_worker_swap(site):
         with page.expect_navigation():
             page.keyboard.press("Enter")
         assert page.url.split("?")[0].endswith("guides/recovery/#enter-recovery"), page.url
+        browser.close()
+
+
+def test_other_repository_results(site_with_source):
+    """A section of another repository, which Material's index doesn't have, is listed
+    under its page, escaped, and links to GitHub at the pinned commit."""
+    url, commit = site_with_source
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        errors = []
+        page.on("console", lambda m: errors.append(m.text) if m.type in ("error", "warning") else None)
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+        box = page.locator('[data-md-component="search-query"]')
+        box.click()
+        page.keyboard.type("lifeboat", delay=20)
+        page.wait_for_function("(document.querySelector('.md-search-result__list h2') || {}).textContent"
+                               " === 'Write the <image> — safely'", timeout=10000)
+        first = page.locator(".md-search-result__list li").first
+        assert first.locator("h1").inner_text() == "Images & slots"
+        base = f"https://github.com/GlassineOS/flasher/blob/{commit}/docs/guides/images.md"
+        hrefs = first.locator("a").evaluate_all("as => as.map(a => a.getAttribute('href'))")
+        assert [h.split("?")[0] for h in hrefs] == [base, base + "#write-the-image--safely"], hrefs
+        assert "battery above half" in first.locator("h2 + *").first.inner_text() or \
+            "battery above half" in first.inner_text()
+        assert not page.locator(".md-search-result__list image").count()  # text, not markup
+
+        # the site's own sections still come from Material's index
+        box.fill("")
+        page.keyboard.type("rescue", delay=20)
+        page.wait_for_function("(document.querySelector('.md-search-result__list h2') || {}).textContent"
+                               " === 'Enter recovery'", timeout=10000)
+        assert page.locator(".md-search-result__list li").first.locator("h1").inner_text() == "Recovery"
+        assert not [e for e in errors if "semantic search" in e], errors
+        browser.close()
+
+
+def set_format(site_dir, manifest_format=None, chunks_format=None, drop_source=False):
+    """Rewrite the built search files in place (the worker doesn't check sha256)."""
+    s = site_dir / "search"
+    m = json.loads((s / "manifest.json").read_text())
+    c = json.loads((s / m["chunks"]["file"]).read_text())
+    if manifest_format is not None:
+        m["format"] = manifest_format
+    if chunks_format is not None:
+        c["format"] = chunks_format
+    if drop_source:
+        for ch in c["chunks"]:
+            del ch["source"]
+    (s / "manifest.json").write_text(json.dumps(m))
+    (s / m["chunks"]["file"]).write_text(json.dumps(c))
+
+
+@pytest.fixture(params=["format-1", "manifest-3", "chunks-3"])
+def site_format(tmp_path, request):
+    write_site(tmp_path)
+    rescue_model(tmp_path, tmp_path / "emb")
+    if request.param == "format-1":  # as the published site is until the docs CI's pin moves
+        set_format(tmp_path / "site", 1, 1, drop_source=True)
+    elif request.param == "manifest-3":
+        set_format(tmp_path / "site", manifest_format=3)
+    else:
+        set_format(tmp_path / "site", chunks_format=3)
+    httpd = serve(tmp_path)
+    Handler.release.set()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}/", request.param
+    httpd.shutdown()
+
+
+def test_worker_reads_format_1_and_refuses_unknown_formats(site_format):
+    url, variant = site_format
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        console = []
+        page.on("console", lambda m: console.append(m.text))
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+        box = page.locator('[data-md-component="search-query"]')
+        box.click()
+        page.keyboard.type("recovery rescue", delay=20)
+        page.wait_for_function("document.querySelectorAll('.md-search-result__list li').length > 0")
+        if variant == "format-1":
+            # chunks without "source" are the site's own: the vector-only hit is listed
+            page.wait_for_function("[...document.querySelectorAll('.md-search-result__list h2')]"
+                                   ".some(h => h.textContent.includes('Enter recovery'))", timeout=10000)
+            assert not [t for t in console if "semantic search" in t], console
+        else:
+            # an unknown format: the worker says why and stays with Material's keyword results
+            what = "search format 3" if variant == "manifest-3" else "chunks format 3"
+            for _ in range(40):  # the worker's warning reaches the page's console
+                if any(what in t for t in console):
+                    break
+                page.wait_for_timeout(250)
+            assert any("semantic search" in t and what in t for t in console), console
+            box.fill("")
+            page.keyboard.type("rescue", delay=20)
+            page.wait_for_timeout(1000)
+            assert "Enter recovery" not in page.locator(".md-search-result__list").inner_text()
         browser.close()

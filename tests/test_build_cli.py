@@ -14,7 +14,7 @@ from helpers import build_site
 def test_outputs_and_manifest(site):
     out, res = site
     m = json.loads((out / "manifest.json").read_text())
-    assert m["format"] == 1 and m["commit"] == COMMIT and not m["dirty"]
+    assert m["format"] == 2 and m["commit"] == COMMIT and not m["dirty"]
     assert m["sources"] == [{"name": "docs", "commit": COMMIT}]
     names = {p.name for p in out.iterdir()}
     for entry in [m["chunks"], m["bm25"], m["profiles"]["static"]["vectors"], m["profiles"]["static"]["model"]]:
@@ -24,7 +24,7 @@ def test_outputs_and_manifest(site):
     assert {m["web"]["text.js"], m["web"]["score.js"]} <= names
     assert (out.parent / m["web"]["worker"]).is_file()
     chunks = json.loads((out / m["chunks"]["file"]).read_text())["chunks"]
-    assert chunks[0]["id"] == f"docs@{COMMIT}:index.md"
+    assert chunks[0]["id"] == f"docs@{COMMIT}:index.md" and chunks[0]["source"] == "docs"
     assert any(c["id"] == f"docs@{COMMIT}:guides/recovery.md#edl" for c in chunks)
     meta, arr = store.unpack((out / m["profiles"]["static"]["vectors"]["file"]).read_bytes())
     assert arr["bits"].shape == (len(chunks), 8) and arr["q8"].shape == (len(chunks), 64)
@@ -42,8 +42,9 @@ def test_vectors_come_from_the_published_table(site, model_file):
 
 def test_related_pages(site):
     _, res = site
-    assert set(res.related) == {"index.md", "guides/recovery.md", "decisions/0006-data-encryption.md",
-                                "architecture/updates.md", "guides/eink.md"}
+    assert set(res.related) == {("docs", p) for p in ["index.md", "guides/recovery.md",
+                                                      "decisions/0006-data-encryption.md",
+                                                      "architecture/updates.md", "guides/eink.md"]}
     for page, rel in res.related.items():
         assert len(rel) == 2 and page not in [p for p, _ in rel]
 

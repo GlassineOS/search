@@ -3,7 +3,8 @@
 
 The MkDocs plugin calls ``Builder.build`` once all pages are rendered and
 ``Builder.write`` after the site is written. Without MkDocs, ``build`` takes
-any list of ``Page`` records.
+any list of ``Page`` records. With ``Options.sources_file``, ``build`` also
+fetches and renders the documentation folders that file lists (see sources.py).
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import FORMAT_VERSION, __version__, bm25, chunk, fusion, models, quant, store
+from . import FORMAT_VERSION, __version__, bm25, chunk, fusion, models, quant, sources, store
 from .staticmodel import StaticModel, convert
 
 WEB_DIR = Path(__file__).with_name("web")
@@ -33,10 +34,11 @@ STATIC_CANDIDATES = 100
 
 @dataclass
 class Page:
-    src: str      # source path, e.g. "guides/recovery.md"
+    src: str      # path in its repository, e.g. "docs/guides/recovery.md"
     title: str
-    url: str      # site-relative URL, e.g. "guides/recovery/"
+    url: str      # site-relative URL, e.g. "guides/recovery/"; absolute for another source
     html: str
+    source: str | None = None  # None: the site's own source (Options.source)
 
 
 @dataclass
@@ -48,11 +50,16 @@ class Options:
     embed_cache: Path = Path(".cache/glassine-search/embeddings")
     mirror: str | None = None
     hf_fallback: bool = False
-    source: str = "docs"
+    source: str = "docs"  # the site's own source: its name in chunk IDs
+    folder: str = ""      # its documentation folder in its repository (for the manifest)
     site_url: str = ""
     repo_dir: Path = Path(".")
     max_words: int = chunk.MAX_WORDS
     static_model_file: Path | None = None  # a ready static-model.bin (tests, offline dev)
+    sources_file: Path | None = None  # other repositories to index (sources.py)
+    source_cache: Path = Path(".cache/glassine-search/sources")
+    fetch_url: str = sources.FETCH_URL
+    link_url: str = sources.LINK_URL
 
 
 @dataclass
@@ -61,7 +68,7 @@ class Result:
     files: dict[str, bytes] = field(default_factory=dict)
     site_files: dict[str, bytes] = field(default_factory=dict)  # paths from the site root
     manifest: dict = field(default_factory=dict)
-    related: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
+    related: dict = field(default_factory=dict)  # (source, page) -> [((source, page), score)]
     stats: dict = field(default_factory=dict)
 
 
@@ -172,15 +179,38 @@ class Builder:
                                                  max_length=entry["max_length"])
         return self._transformer
 
+    # --- sources --------------------------------------------------------
+    def other_sources(self) -> tuple[list[sources.Source], list[Page]]:
+        """The sources file's repositories, fetched, and their pages. Any failure raises
+        ``sources.SourceError``: a source is never skipped."""
+        o = self.opts
+        if not o.sources_file:
+            return [], []
+        srcs = sources.load(o.sources_file, o.link_url, reserved=(o.source,))
+        pages = []
+        for s in srcs:
+            folder = sources.fetch(s, o.source_cache, o.fetch_url)
+            got = sources.pages(s, folder)
+            if not got:  # most likely a wrong folder or commit: say so rather than index nothing
+                raise sources.SourceError(f"{s.repository} at {s.commit}: no .md files in {s.folder}/")
+            log(f"{s.name}@{s.commit[:12]}: {len(got)} pages from {s.folder}/")
+            pages.extend(Page(src=d["page"], title=d["title"], url=d["url"], html=d["html"], source=s.name)
+                         for d in got)
+        return srcs, pages
+
     # --- build ----------------------------------------------------------
     def build(self, pages: list[Page]) -> Result:
         o = self.opts
         t0 = time.monotonic()
         commit, dirty = docs_commit(o.repo_dir)
         cid = commit + ("-dirty" if dirty else "")
+        own = sources.Source(name=o.source, commit=cid, folder=o.folder)
+        others, other_pages = self.other_sources()
+        srcs = {s.name: s for s in [own] + others}
         chunks = []
-        for p in pages:
-            chunks.extend(chunk.chunk_page(p.html, source=o.source, commit=cid, page=p.src,
+        for p in list(pages) + other_pages:
+            s = srcs[p.source or o.source]
+            chunks.extend(chunk.chunk_page(p.html, source=s.name, commit=s.commit, page=p.src,
                                            title=p.title, url=p.url, max_words=o.max_words))
         texts = [c.embed_text() for c in chunks]
         res = Result(chunks=chunks)
@@ -188,7 +218,7 @@ class Builder:
         files = {}
 
         chunks_doc = {"format": FORMAT_VERSION, "commit": cid, "chunks": [
-            {"id": c.id, "page": c.page, "title": c.title, "heading": c.heading,
+            {"id": c.id, "source": c.source, "page": c.page, "title": c.title, "heading": c.heading,
              "path": c.path, "url": c.url, "text": c.text} for c in chunks]}
         cdata = json.dumps(chunks_doc, ensure_ascii=False, separators=(",", ":")).encode()
         cname = hashed_name("chunks.json", cdata)
@@ -202,7 +232,7 @@ class Builder:
         manifest = {
             "format": FORMAT_VERSION, "generator": f"glassine-docs {__version__}",
             "site_url": o.site_url, "commit": cid, "dirty": dirty,
-            "sources": [{"name": o.source, "commit": cid}],
+            "sources": [s.manifest() for s in srcs.values()],
             "chunks": {**_file_entry(cname, cdata), "count": len(chunks)},
             "bm25": {**_file_entry(bname, bdata), "k1": idx["k1"], "b": idx["b"]},
             "fusion": {"method": "rrf", "k": fusion.K, "depth": fusion.DEPTH},
@@ -293,12 +323,16 @@ class Builder:
                                                encoding="utf-8")
 
 
-def related_pages(chunks, vecs: np.ndarray, count: int) -> dict[str, list[tuple[str, float]]]:
-    """Per page, the closest pages. Page similarity: each chunk's best match in the other
-    page, averaged, in both directions (a mean page vector favours long, general pages)."""
-    pages: dict[str, list[int]] = {}
+PageKey = tuple[str, str]  # (source, page): two sources can both have "docs/index.md"
+
+
+def related_pages(chunks, vecs: np.ndarray, count: int) -> dict[PageKey, list[tuple[PageKey, float]]]:
+    """Per page, the closest pages of any source. Page similarity: each chunk's best match
+    in the other page, averaged, in both directions (a mean page vector favours long,
+    general pages)."""
+    pages: dict[PageKey, list[int]] = {}
     for i, c in enumerate(chunks):
-        pages.setdefault(c.page, []).append(i)
+        pages.setdefault((c.source, c.page), []).append(i)
     names = list(pages)
     if not names:
         return {}

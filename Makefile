@@ -4,7 +4,7 @@ NODE ?= node
 TMP ?= .cache-local
 MODELS ?= .cache/glassine-search/models
 
-.PHONY: check test-py test-js check-browser models check-models golden
+.PHONY: check test-py test-js check-browser check-github models check-models golden
 
 # Offline: synthetic model, sample pages; no network, no model download.
 check: test-py test-js
@@ -23,6 +23,11 @@ test-js:
 check-browser:
 	mkdir -p $(TMP)
 	GDS_BROWSER=1 $(PYTHON) -m pytest -q --basetemp=$(TMP)/pytest tests/browser
+
+# Other repositories' pages rendered as GitHub renders them (network: github.com).
+check-github:
+	mkdir -p $(TMP)
+	GDS_GITHUB=1 $(PYTHON) -m pytest -q --basetemp=$(TMP)/pytest tests/test_github_render.py
 
 # The real models (downloads them once into $(MODELS); HF=1 allows Hugging Face).
 models:
