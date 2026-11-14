@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urljoin
 
-from . import bm25, fusion, models, quant, store
+from . import READS_FORMATS, bm25, fusion, models, quant, store
 from .staticmodel import StaticModel
 
 DEFAULT_BASE = "https://docs.glassine.org/search/"
@@ -33,6 +33,15 @@ def cache_root() -> Path:
 
 class FetchError(RuntimeError):
     pass
+
+
+def check_format(doc: dict, what: str) -> dict:
+    """A reader must reject a format it does not know (docs/format.md)."""
+    f = doc.get("format") if isinstance(doc, dict) else None
+    if f not in READS_FORMATS:
+        raise FetchError(f"{what}: search file format {f!r} is not one this glassine-docs reads "
+                         f"({', '.join(map(str, READS_FORMATS))}); upgrade glassine-docs")
+    return doc
 
 
 def _note(msg: str) -> None:
@@ -64,7 +73,7 @@ class Site:
         self.cache = Path(cache or cache_root())
         self.dir = self.cache / "sites" / hashlib.sha256(self.base.encode()).hexdigest()[:16]
         self.offline = offline
-        self.manifest = self._manifest()
+        self.manifest = check_format(self._manifest(), "manifest.json")
 
     # --- manifest ---------------------------------------------------------
     def _manifest(self) -> dict:
@@ -142,6 +151,7 @@ class Site:
                 p.unlink(missing_ok=True)
 
     def url(self, rel: str) -> str:
+        """A chunk's link: relative to the site root, or absolute (another source's page)."""
         root = self.manifest.get("site_url") or urljoin(self.base, "../")
         return urljoin(root if root.endswith("/") else root + "/", rel)
 
@@ -161,7 +171,7 @@ class Searcher:
             raise FetchError(f"profile {profile!r} not published (have: {', '.join(m['profiles'])})")
         self.profile = profile
         self.prof = m["profiles"][profile]
-        self.chunks = json.loads(site.file(m["chunks"]))["chunks"]
+        self.chunks = check_format(json.loads(site.file(m["chunks"])), m["chunks"]["file"])["chunks"]
         self.index = json.loads(site.file(m["bm25"]))
         meta, arrays = store.unpack(site.file(self.prof["vectors"]))
         self.arrays = arrays

@@ -16,6 +16,7 @@ def test_ids_use_real_anchors():
         "docs@abc:guides/recovery.md#edl",
     ]
     assert cs[1].url == "guides/recovery/#enter-recovery"
+    assert {(c.source, c.page) for c in cs} == {("docs", "guides/recovery.md")}
     assert cs[0].url == "guides/recovery/"
 
 

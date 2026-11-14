@@ -48,13 +48,26 @@ plugins:
   - glassine-search:
       related_profile: static    # or transformer
       related_count: 5
+      sources_file: search-sources.toml   # other repositories to index (optional)
 ```
+
+`sources_file` lists other public repositories whose documentation folder the index
+covers too (decision
+[0012](https://docs.glassine.org/decisions/0012-where-documentation-lives/)): one
+`[[source]]` table each with `repository`, `folder` and a full `commit`. The build
+fetches each one with git at its commit, without credentials, and fails if it can't: a
+private repository is never skipped quietly. Their results, on the site and in
+`glassine-docs`, link to the page on GitHub at that commit. The fields are in
+[docs/format.md](docs/format.md#sources).
 
 | Variable | Effect |
 |---|---|
 | `GLASSINE_SEARCH_MODEL_CACHE` | model download cache (default `.cache/glassine-search/models`) |
 | `GLASSINE_SEARCH_EMBED_CACHE` | embeddings by chunk text and model (default `.cache/glassine-search/embeddings`) |
 | `GLASSINE_SEARCH_PROFILES` | e.g. `static` for a quick local preview |
+| `GLASSINE_SEARCH_SOURCES` | the sources file, instead of `sources_file` |
+| `GLASSINE_SEARCH_SOURCE_CACHE` | fetched sources, by commit (default `.cache/glassine-search/sources`) |
+| `GLASSINE_SEARCH_FETCH_URL` | where sources are fetched from (default `https://github.com/{repository}.git`) |
 | `GLASSINE_MODELS_MIRROR` | where model files come from (default the `models-1` release of this repository) |
 | `GLASSINE_MODELS_HF=1` | fall back to Hugging Face at the pinned revision (development) |
 
@@ -66,6 +79,7 @@ plugins:
 | `glassine_docs/{quant,bm25,fusion,staticmodel}.py`, `web/score.js` | quantization, BM25, reciprocal rank fusion, the static embedder |
 | `glassine_docs/transformer.py` | the transformer profile (onnxruntime, CPU) |
 | `glassine_docs/chunk.py`, `builder.py`, `plugin.py` | chunking, the build, the MkDocs plugin |
+| `glassine_docs/sources.py` | the sources file, fetching other repositories, rendering their pages |
 | `glassine_docs/client.py`, `cli.py` | `glassine-docs` |
 | `glassine_docs/web/worker.js` | replaces Material's search worker: runs it for keywords, fuses in the vector ranking |
 | `glassine_docs/models.json` | the model lock: Hugging Face revision, files, sha256, release asset names |

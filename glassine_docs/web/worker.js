@@ -13,13 +13,17 @@
 // The first non-empty QUERY starts loading the static model, the vectors and the chunk list.
 // Until they are there, Material's keyword results go out as they are. From then on,
 // each query's keyword list and vector list are fused (reciprocal rank fusion) into
-// one list in Material's result format.
+// one list in Material's result format. Sections of other repositories (decision 0012)
+// are not in Material's index: they join as documents of their own, linking to their
+// absolute URL.
 "use strict";
 
 const params = new URL(self.location.href).searchParams;
 const SEARCH_BASE = new URL(params.get("search") || "../../../search/", self.location.href);
 const VECTOR_DEPTH = 10;   // vector hits fused into the keyword list
 const SCORE_SCALE = 1000;  // RRF scores are ~0.03; Material prints scores with 2 decimals
+const FORMATS = [1, 2];    // search file formats this worker reads (docs/format.md)
+const TEXT_CHARS = 300;    // text shown for a section of another repository
 
 // --- run Material's worker, intercepting its message listener and its replies ---
 const fromPage = [];       // Material's "message" listeners
@@ -70,18 +74,22 @@ async function load() {
     return kind === "buf" ? r.arrayBuffer() : r.json();
   };
   const manifest = await get("manifest.json", "manifest");
+  if (!FORMATS.includes(manifest.format)) throw new Error(`search format ${manifest.format} not supported`);
   importScripts(new URL(manifest.web["text.js"], SEARCH_BASE).href, new URL(manifest.web["score.js"], SEARCH_BASE).href);
   const prof = manifest.profiles.static;
   const [model, vecs, chunks] = await Promise.all([
     get(prof.model.file, "buf"), get(prof.vectors.file, "buf"), get(manifest.chunks.file),
   ]);
+  if (!FORMATS.includes(chunks.format)) throw new Error(`chunks format ${chunks.format} not supported`);
   const v = GDS.unpack(vecs);
   sem = {
     model: new GDS.StaticModel(model),
     bits: v.arrays.bits.data, q8: v.arrays.q8.data, scale: v.arrays.scale.data,
     candidates: prof.quantization.candidates || 100,
-    urls: chunks.chunks.map((c) => c.url),
+    chunks: chunks.chunks,
+    own: manifest.sources[0].name,  // the site's own source; format 1 chunks have no source
     k: manifest.fusion.k,
+    other: [], otherAt: new Map(),  // documents of other repositories, numbered after Material's
   };
   // the newest query already has keyword results on screen: send the fused list
   if (keyword && keyword.q === latest) realPost({ type: RESULT, data: fuse(keyword.q, keyword.data) });
@@ -94,6 +102,42 @@ function docIndex() {
   }
   return byLocation;
 }
+
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+function shorten(text) {
+  const t = text.replace(/\s+/g, " ").trim();
+  return t.length <= TEXT_CHARS ? t : t.slice(0, TEXT_CHARS).replace(/\s\S*$/, "") + " …";
+}
+
+// A chunk of another repository as a Material document (title and text are HTML, as in
+// Material's index), with its page as the parent; the number of either document.
+function otherDoc(location, make) {
+  let i = sem.otherAt.get(location);
+  if (i === undefined) {
+    i = docs.length + sem.other.length;
+    sem.other.push(make());
+    sem.otherAt.set(location, i);
+  }
+  return i;
+}
+
+function chunkDoc(c) {
+  const page = c.url.split("#")[0];
+  const text = `<p>${escapeHtml(shorten(c.text))}</p>`;
+  const p = otherDoc(page, () => ({ location: page, title: escapeHtml(c.title), text: "" }));
+  if (page === c.url) {  // the text before the first heading belongs to the page itself
+    if (!sem.other[p - docs.length].text) sem.other[p - docs.length].text = text;
+    return p;
+  }
+  return otherDoc(c.url, () => ({ location: c.url, title: escapeHtml(c.heading), text, parent: docAt(p) }));
+}
+
+const docAt = (i) => (i < docs.length ? docs[i] : sem.other[i - docs.length]);
+const locate = (location) => {
+  const i = docIndex().get(location);
+  return i !== undefined ? i : sem.otherAt.get(location);
+};
 
 // Material's result + vector ranking -> one result in Material's format.
 function fuse(q, data) {
@@ -110,7 +154,9 @@ function fuse(q, data) {
   const vec = [];
   const seen = new Set();
   for (const [c] of GDS.staticScores(sem.model.embed(q), sem.bits, sem.q8, sem.scale, sem.candidates)) {
-    const i = index.get(sem.urls[c]);
+    const chunk = sem.chunks[c];
+    // a page of this site that Material's index leaves out is skipped, as before
+    const i = chunk.source && chunk.source !== sem.own ? chunkDoc(chunk) : index.get(chunk.url);
     if (i === undefined || seen.has(i)) continue;
     seen.add(i);
     vec.push(i);
@@ -120,7 +166,7 @@ function fuse(q, data) {
   // group by page, in fused order; every group carries its page, as Material's do
   const groups = new Map();
   for (const [i, score] of fused) {
-    const doc = docs[i];
+    const doc = docAt(i);
     const it = { ...(items.get(doc.location) || { ...doc, terms: {} }), score: score * SCORE_SCALE };
     const page = doc.parent ? doc.parent.location : doc.location;
     if (!groups.has(page)) groups.set(page, []);
@@ -128,8 +174,8 @@ function fuse(q, data) {
   }
   for (const [page, list] of groups) {
     if (!list.some((it) => it.location === page)) {
-      const i = index.get(page);
-      if (i !== undefined) list.push({ ...docs[i], score: 0, terms: {} });
+      const i = locate(page);
+      if (i !== undefined) list.push({ ...docAt(i), score: 0, terms: {} });
     }
   }
   const out = { items: [...groups.values()] };

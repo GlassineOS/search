@@ -37,6 +37,7 @@ class Section:
 @dataclass
 class Chunk:
     id: str
+    source: str
     page: str
     title: str
     heading: str
@@ -172,7 +173,8 @@ def _split(blocks: list[str], max_words: int) -> list[list[str]]:
 
 def chunk_page(html: str, *, source: str, commit: str, page: str, title: str, url: str,
                max_words: int = MAX_WORDS) -> list[Chunk]:
-    """Chunks of one page. ``page`` is its source path, ``url`` its absolute URL."""
+    """Chunks of one page. ``page`` is its path in the source's repository, ``url`` its
+    link: relative to the site root, or absolute for a page of another repository."""
     p = _Parser(title)
     p.feed(html)
     p.close()
@@ -185,7 +187,7 @@ def chunk_page(html: str, *, source: str, commit: str, page: str, title: str, ur
         link = url + (f"#{s.anchor}" if s.anchor else "")
         for i, blocks in enumerate(_split(s.blocks, max_words)):
             out.append(Chunk(
-                id=base + (f"~{i + 1}" if i else ""), page=page, title=title,
+                id=base + (f"~{i + 1}" if i else ""), source=source, page=page, title=title,
                 heading=s.heading if s.anchor else title, path=s.path, url=link,
                 text="\n".join(blocks)))
     return out

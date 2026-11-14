@@ -1,4 +1,4 @@
-# Search file format, version 1
+# Search file format, version 2
 
 The docs build writes these files into `search/` next to the site. Every file except
 `manifest.json` carries the first 12 hex digits of its sha256 in its name
@@ -6,16 +6,25 @@ The docs build writes these files into `search/` next to the site. Every file ex
 `manifest.json` first (revalidated with its ETag) and fetch only files whose names
 they don't have yet.
 
+The index covers the site's own pages and, per decision
+[0012](https://docs.glassine.org/decisions/0012-where-documentation-lives/), the
+documentation folders of other public repositories listed in the build's sources file
+(see [Sources](#sources)). Each of these is a *source*.
+
 ## manifest.json
 
 ```jsonc
 {
-  "format": 1,
+  "format": 2,
   "generator": "glassine-docs 0.1.0",
   "site_url": "https://docs.glassine.org/",
-  "commit": "<docs commit>",           // "-dirty" appended for a tree with changes
+  "commit": "<docs commit>",           // the site's own source; "-dirty" for a tree with changes
   "dirty": false,
-  "sources": [{"name": "docs", "commit": "<docs commit>"}],
+  "sources": [
+    {"name": "docs", "commit": "<docs commit>", "folder": "docs"},
+    {"name": "search", "commit": "<full commit>", "repository": "GlassineOS/search",
+     "folder": "docs", "url": "https://github.com/GlassineOS/search/blob/<full commit>/"}
+  ],
   "chunks": {"file": "chunks.<h>.json", "sha256": "…", "size": 0, "count": 0},
   "bm25":   {"file": "bm25.<h>.json",   "sha256": "…", "size": 0, "k1": 1.2, "b": 0.75},
   "fusion": {"method": "rrf", "k": 60, "depth": 100},
@@ -48,23 +57,43 @@ A profile's model files are either on the site (`model.file`, the static profile
 release assets of the mirror (`model.files[].asset`, the transformer profile; the
 default mirror is `https://github.com/GlassineOS/search/releases/download/models-1/`).
 Clients check every file against its sha256. A reader must reject a `format` it does
-not know.
+not know; `glassine-docs` and the site's worker read formats 1 and 2.
+
+- `commit` and `dirty` are those of the site's own source, the checkout the build ran
+  in. Every other source is at the commit its entry pins, so it is never dirty.
+- `sources` lists every source the chunks come from, the site's own first. `name` is
+  the source's name in chunk IDs (the repository's name). `folder` is its documentation
+  folder in its repository, `repository` and `url` are given for other repositories:
+  `url` is where their pages link, the page's path in the repository follows it.
 
 ## chunks.json
 
 ```json
-{"format": 1, "commit": "…", "chunks": [
-  {"id": "docs@<commit>:guides/recovery.md#enter-recovery", "page": "guides/recovery.md",
-   "title": "Recovery", "heading": "Enter recovery", "path": ["Enter recovery"],
-   "url": "guides/recovery/#enter-recovery", "text": "…"}]}
+{"format": 2, "commit": "…", "chunks": [
+  {"id": "docs@<commit>:docs/guides/recovery.md#enter-recovery", "source": "docs",
+   "page": "docs/guides/recovery.md", "title": "Recovery", "heading": "Enter recovery",
+   "path": ["Enter recovery"], "url": "guides/recovery/#enter-recovery", "text": "…"},
+  {"id": "search@<commit>:docs/format.md#chunksjson", "source": "search",
+   "page": "docs/format.md", "title": "Search file format, version 2", "heading": "chunks.json",
+   "path": ["chunks.json"],
+   "url": "https://github.com/GlassineOS/search/blob/<commit>/docs/format.md#chunksjson",
+   "text": "…"}]}
 ```
 
-- `id` is `<source>@<commit>:<page>#<anchor>`. `<page>` is the source file's path in
-  its repository, `<anchor>` the heading's HTML id as the page renders it. The text
-  before the first `h2` has no `#<anchor>`. A section longer than 300 words is split at
-  block boundaries; its parts after the first get `~2`, `~3`, … after the anchor and
-  link to the same `url`.
-- `url` is relative to the site root.
+- `commit` is the manifest's `commit`.
+- `id` is `<source>@<commit>:<page>#<anchor>`, with the commit of its source. `<page>`
+  is the source file's path in its repository, documentation folder included (it was
+  the path inside the documentation folder in format 1). `<anchor>` is the heading's
+  HTML id as the page's link target renders it: MkDocs' for the site's own pages,
+  GitHub's for other repositories' (see [Sources](#sources)). The text before the first
+  `h2` has no `#<anchor>`. A section longer than 300 words is split at block
+  boundaries; its parts after the first get `~2`, `~3`, … after the anchor and link to
+  the same `url`.
+- `source` is the `name` of its entry in the manifest's `sources` (new in format 2).
+  `source` and `page` together name a page; `page` alone can repeat across sources.
+- `url` is relative to the site root for the site's own pages, and absolute for other
+  repositories' pages, which are not on the site: their rendering on GitHub at the
+  pinned commit, `<source url><page>#<anchor>`.
 - `path` is the trail of headings from `h2` down to this one.
 - The order of `chunks` is the row order of every vector file and the document number
   of the BM25 index.
@@ -118,6 +147,26 @@ away from zero, clipped to ±127. All vectors are L2-normalised before quantizat
 - **transformer**: `[CLS] tokens [SEP]` (at most 512), `[CLS]` output, L2-normalised.
   Queries are prefixed with `query_prefix`, passages are not.
 
+## Sources
+
+The build's input is a TOML file (the plugin's `sources_file`; the docs repository's
+`search-sources.toml`) with one `[[source]]` table per repository:
+
+| Field | Meaning |
+|---|---|
+| `repository` | a public repository, `GlassineOS/<name>`; `<name>` becomes the source's name |
+| `folder` | its documentation folder, relative to the repository root |
+| `commit` | the full 40-character commit to index |
+
+Each repository is fetched at its commit with git, without credentials, so a private or
+missing repository, a commit it doesn't have or a missing folder fails the build; no
+entry is skipped. Every `.md` file in the folder and below is indexed (hidden files and
+folders and symbolic links are not). Pages are rendered with Python-Markdown (`extra`,
+`sane_lists`), and headings get GitHub's anchors: the heading text in lower case,
+everything but letters, marks, numbers, `_`, `-` and spaces dropped, spaces turned into
+`-`; a repeated anchor gets `-1`, `-2`, …. A page's title is its first `h1`, else its
+file name.
+
 ## The site's search worker
 
 `web.worker` (a path from the site root) replaces Material's search worker. The plugin
@@ -129,7 +178,11 @@ non-empty QUERY loads `text.js`, `score.js`, the static model, the static vector
 the chunks. From then on a RESULT holds Material's items and the sections the vectors
 find (up to 10, as Material's documents without highlighting), ordered by reciprocal
 rank fusion of Material's keyword order and the vector order, grouped by page as
-Material groups them, with `score` = fused score × 1000. A RESULT is only sent for the
+Material groups them, with `score` = fused score × 1000. Sections of other
+repositories are not in Material's index: they join as documents of their own (the
+heading as title, the first 300 characters of the text) with their page as the parent,
+linking to their absolute `url`. A section of the site that Material's index leaves out
+is not shown. A RESULT is only sent for the
 newest query; when the model arrives, the newest query's RESULT is sent again, fused.
 
 ## Search

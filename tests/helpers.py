@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -64,10 +66,45 @@ def pages() -> list[builder.Page]:
     return [builder.Page(src=s, title=t, url=u, html=h) for s, t, u, h in PAGES]
 
 
-def build_site(out_dir: Path, model_file: Path, embed_cache: Path, page_list=None, profiles=("static",)):
+def build_site(out_dir: Path, model_file: Path, embed_cache: Path, page_list=None, profiles=("static",),
+               **opts):
     opts = builder.Options(profiles=profiles, related_profile="static", related_count=2,
                            embed_cache=embed_cache, static_model_file=model_file,
-                           site_url="https://docs.example.org/", repo_dir=out_dir)
+                           site_url="https://docs.example.org/", repo_dir=out_dir, **opts)
     res = builder.Builder(opts).build(page_list or pages())
     builder.Builder.write(res, out_dir)
     return res
+
+
+SOURCE_PAGES = {
+    "docs/index.md": "# Example\n\nThe example tool writes widgets to the panel.\n",
+    "docs/guides/flashing.md": "# Flashing\n\nHow to write an image.\n\n## Write the image\n\n"
+                               "Run `example flash` with the tablet in EDL.\n\n## Write the image\n\n"
+                               "A second section with the same heading.\n",
+    "docs/.hidden.md": "# Hidden\n\nnot indexed\n",
+    "README.md": "# Readme\n\noutside the documentation folder\n",
+}
+
+
+def git_repo(path: Path, files: dict[str, str] = SOURCE_PAGES) -> str:
+    """A local git repository with ``files`` in one commit; returns the commit."""
+    path.mkdir(parents=True, exist_ok=True)
+    for name, text in files.items():
+        (path / name).parent.mkdir(parents=True, exist_ok=True)
+        (path / name).write_text(text, encoding="utf-8")
+    env = {"PATH": os.environ["PATH"], "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=path, env=env, check=True, capture_output=True,
+                              text=True).stdout.strip()
+
+    git("init", "-q")
+    git("add", ".")
+    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-qm", "docs")
+    return git("rev-parse", "HEAD")
+
+
+def sources_toml(path: Path, entries: list[dict]) -> Path:
+    path.write_text("".join("[[source]]\n" + "".join(f'{k} = "{v}"\n' for k, v in e.items()) + "\n"
+                            for e in entries), encoding="utf-8")
+    return path

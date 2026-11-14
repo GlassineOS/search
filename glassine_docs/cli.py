@@ -42,6 +42,7 @@ def cmd_search(a) -> int:
             "query": a.query, "profile": profile, "commit": m["commit"], "sources": m["sources"],
             "model": s.prof["model"]["id"], "ms": round(secs * 1000, 2),
             "results": [{"rank": h.rank, "score": round(h.score, 6), "id": h.chunk["id"],
+                         "source": h.chunk.get("source", m["sources"][0]["name"]),
                          "title": h.chunk["title"], "heading": h.chunk["heading"], "url": h.url,
                          "text": h.chunk["text"], "bm25_rank": h.bm25_rank, "vector_rank": h.vector_rank,
                          "vector_score": None if h.vector_score is None else round(h.vector_score, 6)}
@@ -53,7 +54,10 @@ def cmd_search(a) -> int:
         print(f"{h.rank}. {h.score:.4f}  {where}")
         print(f"   {h.url}")
         print(textwrap.indent(textwrap.fill(_trim(c["text"], a.width * 3), a.width - 3), "   "))
-    print(f"docs commit {m['commit']} · profile {profile} · {secs * 1000:.0f} ms")
+    # the docs commit is the site's own; another source's results carry its commit in their link
+    others = ", ".join(f"{s['name']}@{s['commit'][:12]}" for s in m["sources"][1:])
+    print(f"docs commit {m['commit']}" + (f" · other sources {others}" if others else "")
+          + f" · profile {profile} · {secs * 1000:.0f} ms")
     return 0
 
 
