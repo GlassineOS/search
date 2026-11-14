@@ -72,12 +72,43 @@ def test_fetch_checks_out_only_the_folder_and_caches(tmp_path):
     url = f"file://{tmp_path}/repo"
     folder = sources.fetch(src_for(tmp_path / "repo", commit), tmp_path / "cache", url)
     tree = folder.parent
-    assert folder == tmp_path / "cache" / f"example@{commit}" / "docs"
+    assert tree.parent == tmp_path / "cache" and tree.name.startswith(f"example@{commit}-")
     assert (folder / "guides" / "flashing.md").is_file()
     assert not (tree / "README.md").exists() and not (tree / ".git").exists()
     shutil.rmtree(tmp_path / "repo")  # a pinned commit never changes: the cache is enough
     assert sources.fetch(src_for(None, commit), tmp_path / "cache", url) == folder
-    assert [p.name for p in (tmp_path / "cache").iterdir()] == [f"example@{commit}"]
+    assert [p.name for p in (tmp_path / "cache").iterdir()] == [tree.name]
+
+
+def test_fetch_cache_follows_the_folder(tmp_path):
+    """Only the folder is checked out: the same commit with another folder is fetched anew."""
+    commit = git_repo(tmp_path / "repo", {"docs/a.md": "# A\n", "docs/sub/b.md": "# B\n",
+                                          "manual/c.md": "# C\n"})
+    url, cache = f"file://{tmp_path}/repo", tmp_path / "cache"
+    def names(folder):
+        s = src_for(None, commit, folder=folder)
+        return [p["page"] for p in sources.pages(s, sources.fetch(s, cache, url))]
+    assert names("docs/sub") == ["docs/sub/b.md"]
+    assert names("docs") == ["docs/a.md", "docs/sub/b.md"]
+    assert names("manual") == ["manual/c.md"]
+    assert len(list(cache.iterdir())) == 3
+
+
+def test_fetch_tolerates_another_build_storing_first(tmp_path, monkeypatch):
+    commit = git_repo(tmp_path / "repo")
+    url, cache = f"file://{tmp_path}/repo", tmp_path / "cache"
+    s = src_for(None, commit)
+    first = sources.fetch(s, cache, url)
+    (first.parent / sources.DONE).unlink()  # as if this build had not seen the other's checkout
+    real_rmtree = shutil.rmtree
+
+    def keep_dest(path, *a, **kw):  # the other build's checkout lands between rmtree and replace
+        if path != first.parent:
+            real_rmtree(path, *a, **kw)
+        else:
+            (first.parent / sources.DONE).write_text(commit)
+    monkeypatch.setattr(sources.shutil, "rmtree", keep_dest)
+    assert sources.fetch(s, cache, url) == first
 
 
 def test_fetch_failures_fail(tmp_path):
@@ -138,6 +169,20 @@ def test_pages_render_with_github_anchors(tmp_path):
     assert '<h1 id="flashing">' in fl["html"]
     assert '<h2 id="write-the-image">' in fl["html"] and '<h2 id="write-the-image-1">' in fl["html"]
     assert "<code>example flash</code>" in fl["html"]
+
+
+def test_page_urls_are_percent_encoded(tmp_path):
+    folder = tmp_path / "tree" / "docs" / "sub"
+    folder.mkdir(parents=True)
+    (folder / "my page#1.md").write_text("# P\n\n## Über\n\ntext\n")
+    s = src_for(None, C)
+    (p,) = sources.pages(s, folder.parent)
+    assert p["page"] == "docs/sub/my page#1.md"
+    assert p["url"] == f"{s.url}docs/sub/my%20page%231.md"
+    from glassine_docs.chunk import chunk_page
+    cs = chunk_page(p["html"], source="example", commit=C, page=p["page"], title=p["title"], url=p["url"])
+    assert cs[-1].url.split("#", 1) == [p["url"], "über"]  # the page is everything before the first "#"
+    assert cs[-1].id == f"example@{C}:docs/sub/my page#1.md#über"
 
 
 def test_pages_skip_symlinks(tmp_path):

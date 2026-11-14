@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from helpers import SOURCE_PAGES, git_repo, sources_toml
+from glassine_docs.plugin import repo_path
+from helpers import SOURCE_PAGES, git, git_repo, sources_toml
 
 mkdocs = pytest.importorskip("mkdocs")
 pytest.importorskip("material")
@@ -19,7 +20,10 @@ PAGES = {
 }
 
 
-def mkdocs_site(tmp_path, model_file, monkeypatch, extra=""):
+def mkdocs_site(tmp_path, model_file, monkeypatch, extra="", sub=""):
+    """A site in its own git repository (as the docs repository is); mkdocs.yml in ``sub``."""
+    git(tmp_path, "init", "-q")
+    tmp_path = tmp_path / sub
     docs = tmp_path / "docs"
     for name, text in PAGES.items():
         (docs / name).parent.mkdir(parents=True, exist_ok=True)
@@ -70,7 +74,7 @@ def test_mkdocs_build_with_sources(tmp_path, model_file, monkeypatch):
     assert [s["name"] for s in m["sources"]] == ["docs", "example"]
     chunks = json.loads((site / "search" / m["chunks"]["file"]).read_text())["chunks"]
     assert f"example@{commit}:docs/recovery.md" in [c["id"] for c in chunks]
-    assert (tmp_path / ".cache/glassine-search/sources" / f"example@{commit}").is_dir()
+    assert list((tmp_path / ".cache/glassine-search/sources").glob(f"example@{commit}-*/docs"))
     # the closest page to Recovery is the other repository's: an absolute link
     page = (site / "guides" / "recovery" / "index.html").read_text()
     related = page.split('class="gds-related"')[1].split("</nav>")[0]
@@ -88,3 +92,21 @@ def test_mkdocs_build_fails_on_a_source_it_cannot_fetch(tmp_path, model_file, mo
     assert "glassine-search: GlassineOS/private at " in caplog.text
     assert "fetched without credentials" in caplog.text
     assert not (tmp_path / "site" / "search").exists()
+
+
+def test_page_is_the_path_from_the_top_of_the_repository(tmp_path, model_file, monkeypatch):
+    """mkdocs.yml need not sit at the top: <page> still starts at the repository's top."""
+    build(mkdocs_site(tmp_path, model_file, monkeypatch, sub="site"))
+    out = tmp_path / "site" / "site"
+    m = json.loads((out / "search" / "manifest.json").read_text())
+    assert m["sources"][0]["folder"] == "site/docs"
+    chunks = json.loads((out / "search" / m["chunks"]["file"]).read_text())["chunks"]
+    assert {c["page"] for c in chunks} == {f"site/docs/{p}" for p in PAGES}
+
+
+def test_repo_path(tmp_path):
+    git(tmp_path, "init", "-q")
+    (tmp_path / "a" / "docs").mkdir(parents=True)
+    assert repo_path(tmp_path / "a" / "docs", tmp_path / "a") == "a/docs"
+    assert repo_path(tmp_path, tmp_path) == ""
+    assert repo_path(tmp_path.parent / "elsewhere", tmp_path) == ""

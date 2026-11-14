@@ -17,6 +17,7 @@ their rendering on GitHub at the pinned commit.
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import re
@@ -26,6 +27,7 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from urllib.parse import quote
 
 FETCH_URL = "https://github.com/{repository}.git"
 LINK_URL = "https://github.com/{repository}/blob/{commit}/"
@@ -124,7 +126,9 @@ def _git(args: list[str], cwd: Path, env: dict) -> str:
 def fetch(src: Source, cache: Path, fetch_url: str = FETCH_URL) -> Path:
     """The source's documentation folder at its commit, checked out under ``cache``."""
     cache = Path(cache)
-    dest = cache / f"{src.name}@{src.commit}"
+    # only the folder is checked out: an entry whose folder changes needs its own checkout
+    folder_key = hashlib.sha256(src.folder.encode()).hexdigest()[:12]
+    dest = cache / f"{src.name}@{src.commit}-{folder_key}"
     if (dest / DONE).is_file():
         return _folder(src, dest)
     cache.mkdir(parents=True, exist_ok=True)
@@ -153,7 +157,11 @@ def fetch(src: Source, cache: Path, fetch_url: str = FETCH_URL) -> Path:
         shutil.rmtree(tree / ".git")
         (tree / DONE).write_text(src.commit + "\n")
         shutil.rmtree(dest, ignore_errors=True)
-        os.replace(tree, dest)
+        try:
+            os.replace(tree, dest)
+        except OSError as e:  # another build sharing the cache got there first
+            if not (dest / DONE).is_file():
+                raise SourceError(f"{src.repository} at {src.commit}: cannot store the checkout: {e}") from e
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     return _folder(src, dest)
@@ -213,7 +221,8 @@ def pages(src: Source, folder: Path) -> list[dict]:
             body = markdown.markdown(p.read_text(encoding="utf-8", errors="replace"),
                                      extensions=["extra", "sane_lists"])
             page = f"{src.folder}/{rel}"
-            out.append({"page": page, "title": PurePosixPath(rel).stem, "url": src.url + page,
-                        "html": github_anchors(body)})
+            # a file name may hold spaces or "#": the link is the path percent-encoded
+            out.append({"page": page, "title": PurePosixPath(rel).stem,
+                        "url": src.url + quote(page, safe="/"), "html": github_anchors(body)})
     out.sort(key=lambda d: d["page"])
     return out

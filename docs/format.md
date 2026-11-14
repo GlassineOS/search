@@ -82,8 +82,8 @@ not know; `glassine-docs` and the site's worker read formats 1 and 2.
 
 - `commit` is the manifest's `commit`.
 - `id` is `<source>@<commit>:<page>#<anchor>`, with the commit of its source. `<page>`
-  is the source file's path in its repository, documentation folder included (it was
-  the path inside the documentation folder in format 1). `<anchor>` is the heading's
+  is the source file's path from the top of its repository, documentation folder
+  included (it was the path inside the documentation folder in format 1). `<anchor>` is the heading's
   HTML id as the page's link target renders it: MkDocs' for the site's own pages,
   GitHub's for other repositories' (see [Sources](#sources)). The text before the first
   `h2` has no `#<anchor>`. A section longer than 300 words is split at block
@@ -93,7 +93,7 @@ not know; `glassine-docs` and the site's worker read formats 1 and 2.
   `source` and `page` together name a page; `page` alone can repeat across sources.
 - `url` is relative to the site root for the site's own pages, and absolute for other
   repositories' pages, which are not on the site: their rendering on GitHub at the
-  pinned commit, `<source url><page>#<anchor>`.
+  pinned commit, `<source url><page>#<anchor>` with `<page>` percent-encoded (`/` kept).
 - `path` is the trail of headings from `h2` down to this one.
 - The order of `chunks` is the row order of every vector file and the document number
   of the BM25 index.

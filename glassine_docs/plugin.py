@@ -18,6 +18,7 @@ import html
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from urllib.parse import quote
 
@@ -57,6 +58,26 @@ def _env_bool(name: str) -> bool | None:
     return None if v is None else v.strip().lower() in ("1", "true", "yes", "on")
 
 
+def repo_path(path: Path, root: Path) -> str:
+    """``path`` relative to the top of the git repository holding ``root`` (mkdocs.yml's
+    directory, which need not be the top), else relative to ``root``; "" for the top."""
+    top = root
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root, check=True,
+                             capture_output=True, text=True).stdout.strip()
+        if out:
+            top = Path(out).resolve()
+    except (OSError, subprocess.CalledProcessError):
+        pass
+    for base in (top, root):
+        try:
+            rel = path.relative_to(base).as_posix()
+        except ValueError:
+            continue
+        return "" if rel == "." else rel
+    return ""
+
+
 class SearchPlugin(BasePlugin[_Config]):
     def on_config(self, config, **kw):
         cfg = self.config
@@ -67,12 +88,8 @@ class SearchPlugin(BasePlugin[_Config]):
         related = cfg.related_profile if cfg.related_profile in profiles else profiles[0]
         hf = _env_bool("GLASSINE_MODELS_HF")
         sources_file = os.environ.get("GLASSINE_SEARCH_SOURCES") or cfg.sources_file
-        docs_dir = Path(config.docs_dir).resolve()
-        try:  # <page> in chunk IDs is the path in the repository: the docs folder comes first
-            rel = docs_dir.relative_to(root).as_posix()
-            self.folder = "" if rel == "." else rel
-        except ValueError:
-            self.folder = ""
+        # <page> in chunk IDs is the path in the repository: the docs folder comes first
+        self.folder = repo_path(Path(config.docs_dir).resolve(), root)
         self.opts = Options(
             profiles=tuple(profiles), related_profile=related, related_count=cfg.related_count,
             model_cache=Path(os.environ.get("GLASSINE_SEARCH_MODEL_CACHE") or root / cfg.model_cache),

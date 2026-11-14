@@ -224,3 +224,68 @@ def test_other_repository_results(site_with_source):
         assert page.locator(".md-search-result__list li").first.locator("h1").inner_text() == "Recovery"
         assert not [e for e in errors if "semantic search" in e], errors
         browser.close()
+
+
+def set_format(site_dir, manifest_format=None, chunks_format=None, drop_source=False):
+    """Rewrite the built search files in place (the worker doesn't check sha256)."""
+    s = site_dir / "search"
+    m = json.loads((s / "manifest.json").read_text())
+    c = json.loads((s / m["chunks"]["file"]).read_text())
+    if manifest_format is not None:
+        m["format"] = manifest_format
+    if chunks_format is not None:
+        c["format"] = chunks_format
+    if drop_source:
+        for ch in c["chunks"]:
+            del ch["source"]
+    (s / "manifest.json").write_text(json.dumps(m))
+    (s / m["chunks"]["file"]).write_text(json.dumps(c))
+
+
+@pytest.fixture(params=["format-1", "manifest-3", "chunks-3"])
+def site_format(tmp_path, request):
+    write_site(tmp_path)
+    rescue_model(tmp_path, tmp_path / "emb")
+    if request.param == "format-1":  # as the published site is until the docs CI's pin moves
+        set_format(tmp_path / "site", 1, 1, drop_source=True)
+    elif request.param == "manifest-3":
+        set_format(tmp_path / "site", manifest_format=3)
+    else:
+        set_format(tmp_path / "site", chunks_format=3)
+    httpd = serve(tmp_path)
+    Handler.release.set()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}/", request.param
+    httpd.shutdown()
+
+
+def test_worker_reads_format_1_and_refuses_unknown_formats(site_format):
+    url, variant = site_format
+    with playwright.sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        console = []
+        page.on("console", lambda m: console.append(m.text))
+        page.goto(url)
+        page.wait_for_load_state("networkidle")
+        box = page.locator('[data-md-component="search-query"]')
+        box.click()
+        page.keyboard.type("recovery rescue", delay=20)
+        page.wait_for_function("document.querySelectorAll('.md-search-result__list li').length > 0")
+        if variant == "format-1":
+            # chunks without "source" are the site's own: the vector-only hit is listed
+            page.wait_for_function("[...document.querySelectorAll('.md-search-result__list h2')]"
+                                   ".some(h => h.textContent.includes('Enter recovery'))", timeout=10000)
+            assert not [t for t in console if "semantic search" in t], console
+        else:
+            # an unknown format: the worker says why and stays with Material's keyword results
+            what = "search format 3" if variant == "manifest-3" else "chunks format 3"
+            for _ in range(40):  # the worker's warning reaches the page's console
+                if any(what in t for t in console):
+                    break
+                page.wait_for_timeout(250)
+            assert any("semantic search" in t and what in t for t in console), console
+            box.fill("")
+            page.keyboard.type("rescue", delay=20)
+            page.wait_for_timeout(1000)
+            assert "Enter recovery" not in page.locator(".md-search-result__list").inner_text()
+        browser.close()

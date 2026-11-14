@@ -86,22 +86,22 @@ SOURCE_PAGES = {
 }
 
 
+def git(path: Path, *args) -> str:
+    env = {"PATH": os.environ["PATH"], "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+    return subprocess.run(["git", *args], cwd=path, env=env, check=True, capture_output=True,
+                          text=True).stdout.strip()
+
+
 def git_repo(path: Path, files: dict[str, str] = SOURCE_PAGES) -> str:
     """A local git repository with ``files`` in one commit; returns the commit."""
     path.mkdir(parents=True, exist_ok=True)
     for name, text in files.items():
         (path / name).parent.mkdir(parents=True, exist_ok=True)
         (path / name).write_text(text, encoding="utf-8")
-    env = {"PATH": os.environ["PATH"], "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
-
-    def git(*args):
-        return subprocess.run(["git", *args], cwd=path, env=env, check=True, capture_output=True,
-                              text=True).stdout.strip()
-
-    git("init", "-q")
-    git("add", ".")
-    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-qm", "docs")
-    return git("rev-parse", "HEAD")
+    git(path, "init", "-q")
+    git(path, "add", ".")
+    git(path, "-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-qm", "docs")
+    return git(path, "rev-parse", "HEAD")
 
 
 def sources_toml(path: Path, entries: list[dict]) -> Path:
