@@ -191,6 +191,8 @@ class Builder:
         for s in srcs:
             folder = sources.fetch(s, o.source_cache, o.fetch_url)
             got = sources.pages(s, folder)
+            if not got:  # most likely a wrong folder or commit: say so rather than index nothing
+                raise sources.SourceError(f"{s.repository} at {s.commit}: no .md files in {s.folder}/")
             log(f"{s.name}@{s.commit[:12]}: {len(got)} pages from {s.folder}/")
             pages.extend(Page(src=d["page"], title=d["title"], url=d["url"], html=d["html"], source=s.name)
                          for d in got)

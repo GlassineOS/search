@@ -12,8 +12,9 @@ documentation folder and a pinned commit, and the build indexes those folders to
 Each repository is fetched with git at its commit, without any credentials (no global
 or system git config, no credential helper, no netrc, no prompts), so a private or
 missing repository fails the build instead of being skipped. Its Markdown files are
-rendered with Python-Markdown and get GitHub's heading anchors, since its pages link to
-their rendering on GitHub at the pinned commit.
+rendered as GitHub reads them (CommonMark with GFM tables and strikethrough, by
+markdown-it-py) and get GitHub's heading anchors, since its pages link to their
+rendering on GitHub at the pinned commit.
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ OWNER = "GlassineOS"
 FIELDS = ("repository", "folder", "commit")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+GLOB = set("*?[]\\!")  # the folder is a sparse-checkout pattern: no wildcards
 DONE = ".glassine-fetched"  # written last into a complete checkout
 
 
@@ -96,6 +98,9 @@ def load(path: Path, link_url: str = LINK_URL, reserved: tuple[str, ...] = ()) -
         f = PurePosixPath(folder)
         if not folder or f.is_absolute() or ".." in f.parts or str(f) == "." or "\\" in folder:
             raise SourceError(f"{where}: folder {folder!r} must be a folder inside the repository")
+        if GLOB & set(folder) or folder.startswith("#") or folder != folder.strip():
+            raise SourceError(f"{where}: folder {folder!r}: wildcards (* ? [ ] \\ !), a leading # and "
+                              "surrounding spaces are not supported")
         if name in names:
             raise SourceError(f"{where}: {name!r} is listed twice, or is the site itself")
         names.add(name)
@@ -156,7 +161,9 @@ def fetch(src: Source, cache: Path, fetch_url: str = FETCH_URL) -> Path:
         _folder(src, tree)
         shutil.rmtree(tree / ".git")
         (tree / DONE).write_text(src.commit + "\n")
-        shutil.rmtree(dest, ignore_errors=True)
+        if (dest / DONE).is_file():  # another build sharing the cache finished first: keep its tree,
+            return _folder(src, dest)  # which it may be reading
+        shutil.rmtree(dest, ignore_errors=True)  # an unfinished leftover
         try:
             os.replace(tree, dest)
         except OSError as e:  # another build sharing the cache got there first
@@ -203,13 +210,25 @@ def github_anchors(body: str) -> str:
     return HEADING_RE.sub(sub, body)
 
 
+def renderer():
+    """Markdown as GitHub reads it: CommonMark (so "#55 x" is text, not a heading, and
+    "{#id}" stays text) with GFM's tables and strikethrough; raw HTML is kept."""
+    try:
+        from markdown_it import MarkdownIt
+    except ImportError as e:  # in the build extra
+        raise SourceError("rendering other repositories' pages needs markdown-it-py "
+                          "(pip install 'glassine-docs[build]')") from e
+    return MarkdownIt("commonmark", {"html": True}).enable(["table", "strikethrough"])
+
+
+def render(text: str) -> str:
+    return github_anchors(renderer().render(text))
+
+
 def pages(src: Source, folder: Path) -> list[dict]:
     """The folder's Markdown files rendered: page (path in the repository), title, url, html.
     Hidden files and folders and symbolic links are left out."""
-    try:
-        import markdown
-    except ImportError as e:  # the build extra has it (MkDocs needs it)
-        raise SourceError("rendering other repositories' pages needs the markdown package") from e
+    md = renderer()
     out = []
     for dirpath, dirnames, filenames in os.walk(folder):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
@@ -218,8 +237,7 @@ def pages(src: Source, folder: Path) -> list[dict]:
             if fn.startswith(".") or not fn.endswith(".md") or p.is_symlink() or not p.is_file():
                 continue
             rel = p.relative_to(folder).as_posix()
-            body = markdown.markdown(p.read_text(encoding="utf-8", errors="replace"),
-                                     extensions=["extra", "sane_lists"])
+            body = md.render(p.read_text(encoding="utf-8", errors="replace"))
             page = f"{src.folder}/{rel}"
             # a file name may hold spaces or "#": the link is the path percent-encoded
             out.append({"page": page, "title": PurePosixPath(rel).stem,

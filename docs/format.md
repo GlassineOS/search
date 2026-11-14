@@ -155,14 +155,15 @@ The build's input is a TOML file (the plugin's `sources_file`; the docs reposito
 | Field | Meaning |
 |---|---|
 | `repository` | a public repository, `GlassineOS/<name>`; `<name>` becomes the source's name |
-| `folder` | its documentation folder, relative to the repository root |
+| `folder` | its documentation folder, relative to the repository root (no wildcards) |
 | `commit` | the full 40-character commit to index |
 
 Each repository is fetched at its commit with git, without credentials, so a private or
-missing repository, a commit it doesn't have or a missing folder fails the build; no
-entry is skipped. Every `.md` file in the folder and below is indexed (hidden files and
-folders and symbolic links are not). Pages are rendered with Python-Markdown (`extra`,
-`sane_lists`), and headings get GitHub's anchors: the heading text in lower case,
+missing repository, a commit it doesn't have, a missing folder or a folder without
+`.md` files fails the build; no entry is skipped. Every `.md` file in the folder and
+below is indexed (hidden files and folders and symbolic links are not). Pages are
+rendered as GitHub reads them: CommonMark with GFM's tables and strikethrough, raw HTML
+kept (markdown-it-py). Headings get GitHub's anchors: the heading text in lower case,
 everything but letters, marks, numbers, `_`, `-` and spaces dropped, spaces turned into
 `-`; a repeated anchor gets `-1`, `-2`, …. A page's title is its first `h1`, else its
 file name.

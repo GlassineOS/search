@@ -3,6 +3,7 @@
 and what the build and the client make of several sources. Offline: local git repositories."""
 import hashlib
 import json
+import re
 import shutil
 
 import pytest
@@ -40,6 +41,9 @@ def test_load(tmp_path):
     (entry(folder="/docs"), "inside the repository"),
     (entry(folder="."), "inside the repository"),
     (entry(folder=""), "inside the repository"),
+    (entry(folder="docs/[x]"), "wildcards"),
+    (entry(folder="docs/*"), "wildcards"),
+    (entry(folder="#docs"), "a leading #"),
     (entry(repository="GlassineOS/docs"), "the site itself"),
     ({"repository": "GlassineOS/example", "commit": C}, "exactly the fields"),
     (entry(branch="main"), "exactly the fields"),
@@ -185,6 +189,14 @@ def test_page_urls_are_percent_encoded(tmp_path):
     assert cs[-1].id == f"example@{C}:docs/sub/my page#1.md#über"
 
 
+def test_empty_folder_fails_the_build(tmp_path, model_file):
+    commit = git_repo(tmp_path / "repo", {"docs/notes.txt": "no Markdown here\n"})
+    f = sources_toml(tmp_path / "s.toml", [entry(commit=commit)])
+    with pytest.raises(sources.SourceError, match="no .md files in docs/"):
+        build_site(tmp_path / "out", model_file, tmp_path / "emb", sources_file=f,
+                   source_cache=tmp_path / "sources", fetch_url=f"file://{tmp_path}/repo")
+
+
 def test_pages_skip_symlinks(tmp_path):
     (tmp_path / "outside.md").write_text("# Secret\n\nnot in the repository\n")
     folder = tmp_path / "tree" / "docs"
@@ -280,3 +292,50 @@ def test_format_1_site_still_reads(site, capsys):
     (out / "manifest.json").write_text(json.dumps(m))
     assert cli.main(["search", "recovery", "--profile", "static", "--base", str(out), "--json"]) == 0
     assert json.loads(capsys.readouterr().out)["results"][0]["source"] == "docs"
+
+
+# Where a Markdown renderer can read a page otherwise than GitHub does. The expected
+# anchors follow GFM (CommonMark: "#55" without a space is text) and github-slugger.
+TRICKY = """# Block-list hand-off
+
+Intro text.
+
+#55 also says what the bootloader does, which is text on GitHub, not a heading.
+
+##55 x is text too
+
+## Layout {#custom-id}
+
+1) one
+2) two
+
+Setext heading
+--------------
+
+## Repeated
+
+| a | b |
+|---|---|
+| 1 | 2 |
+
+## Repeated
+
+<div>raw <b>HTML</b> block</div>
+
+## `code` and *emphasis* ~~gone~~
+
+# A second h1
+"""
+
+
+def test_render_reads_markdown_as_github_does():
+    html = sources.render(TRICKY)
+    ids = re.findall(r'<h[1-6] id="([^"]*)"', html)
+    assert ids == ["block-list-hand-off", "layout-custom-id", "setext-heading", "repeated", "repeated-1",
+                   "code-and-emphasis-gone", "a-second-h1"]
+    assert "<p>#55 also says" in html and "<p>##55 x is text too</p>" in html
+    assert "<ol>" in html and "<table>" in html and "<s>gone</s>" in html
+    from glassine_docs.chunk import chunk_page
+    cs = chunk_page(html, source="x", commit=C, page="docs/p.md", title="p", url="u/")
+    assert {c.title for c in cs} == {"Block-list hand-off"}  # the first h1, not the last
+    assert "#55 also says" in cs[0].text

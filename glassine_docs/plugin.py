@@ -60,12 +60,17 @@ def _env_bool(name: str) -> bool | None:
 
 def repo_path(path: Path, root: Path) -> str:
     """``path`` relative to the top of the git repository holding ``root`` (mkdocs.yml's
-    directory, which need not be the top), else relative to ``root``; "" for the top."""
+    directory, which need not be the top) if that repository tracks files in ``path``,
+    else relative to ``root``; "" for the top."""
     top = root
     try:
         out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=root, check=True,
                              capture_output=True, text=True).stdout.strip()
-        if out:
+        # a docs tree that is not checked out, sitting inside another repository, is not
+        # that repository's documentation
+        tracked = subprocess.run(["git", "ls-files", "--", str(path)], cwd=root, check=True,
+                                 capture_output=True, text=True).stdout.strip()
+        if out and tracked:
             top = Path(out).resolve()
     except (OSError, subprocess.CalledProcessError):
         pass

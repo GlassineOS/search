@@ -69,6 +69,7 @@ class _Parser(HTMLParser):
         self.heading: tuple[int, str | None] | None = None
         self.heading_text: list[str] = []
         self.trail: list[tuple[int, str]] = []
+        self.h1 = False  # the page's title is its first h1
 
     # text accumulation -----------------------------------------------------
     def _flush(self):
@@ -131,7 +132,8 @@ class _Parser(HTMLParser):
                 self.trail = [(lv, t) for lv, t in self.trail if lv < level]
                 self.trail.append((level, text))
                 self.sections.append(Section(ident, text, level, [t for _, t in self.trail]))
-            elif level == 1:
+            elif level == 1 and not self.h1:
+                self.h1 = True
                 self.sections[0].heading = text or self.sections[0].heading
             else:
                 self.sections[-1].blocks.append(text)

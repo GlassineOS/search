@@ -92,6 +92,7 @@ private repository is never skipped quietly. Their results, on the site and in
 make check            # offline: synthetic model, sample pages, Python and JS parity
 make check-models     # with the real models (downloads them once; HF=1 to allow Hugging Face)
 make check-browser    # the worker swap in headless Chromium (Playwright)
+make check-github     # other repositories' pages: our anchors against GitHub's (network)
 ```
 
 `check-browser` builds a small site with Material, types into its search box and checks

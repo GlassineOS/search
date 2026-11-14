@@ -22,12 +22,14 @@ PAGES = {
 
 def mkdocs_site(tmp_path, model_file, monkeypatch, extra="", sub=""):
     """A site in its own git repository (as the docs repository is); mkdocs.yml in ``sub``."""
-    git(tmp_path, "init", "-q")
+    top = tmp_path
+    git(top, "init", "-q")
     tmp_path = tmp_path / sub
     docs = tmp_path / "docs"
     for name, text in PAGES.items():
         (docs / name).parent.mkdir(parents=True, exist_ok=True)
         (docs / name).write_text(text)
+    git(top, "add", "-A")
     (tmp_path / "mkdocs.yml").write_text(
         "site_name: T\nsite_url: https://docs.example.org/\nuse_directory_urls: true\n"
         "theme:\n  name: material\n"
@@ -107,6 +109,13 @@ def test_page_is_the_path_from_the_top_of_the_repository(tmp_path, model_file, m
 def test_repo_path(tmp_path):
     git(tmp_path, "init", "-q")
     (tmp_path / "a" / "docs").mkdir(parents=True)
+    (tmp_path / "a" / "docs" / "index.md").write_text("# A\n")
+    git(tmp_path, "add", "-A")
     assert repo_path(tmp_path / "a" / "docs", tmp_path / "a") == "a/docs"
     assert repo_path(tmp_path, tmp_path) == ""
     assert repo_path(tmp_path.parent / "elsewhere", tmp_path) == ""
+    # a docs tree the repository around it doesn't track (unpacked, not checked out)
+    # starts at mkdocs.yml's directory
+    (tmp_path / "unpacked" / "docs").mkdir(parents=True)
+    (tmp_path / "unpacked" / "docs" / "index.md").write_text("# U\n")
+    assert repo_path(tmp_path / "unpacked" / "docs", tmp_path / "unpacked") == "docs"
