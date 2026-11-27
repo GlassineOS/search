@@ -18,8 +18,8 @@ if not os.environ.get("GDS_GITHUB"):
 from glassine_docs.chunk import chunk_page  # noqa: E402
 from glassine_docs.sources import render  # noqa: E402
 
-BOOT = "9873ceb2bc5eceb7dfc39703bbaef4da75571626"
-DOCS = "7fe4a088278c967d7173ea2ce52c2896a1b35eae"
+BOOT = "bb5adca9cf88dd789d9b7bc662276fe74644cee2"
+DOCS = "9d8f0b9806059564a94ce195aef2df9498c31b49"
 SEARCH = "3d4e3e2dbff86573ae1d88ed5fe4c9b8b1b710e4"
 PAGES = [
     ("GlassineOS/boot", BOOT, "docs/blocklist.md", "Block-list hand-off: a cold boot of a kernel file"),
